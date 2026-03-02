@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build
+        run: CGO_ENABLED=0 go build ./cmd/cloudblockdev
+
+      - name: Test
+        run: go test -short -race -count=5 -timeout 30m ./...
+
+      - name: Lint
+        run: go tool golangci-lint run ./...
+
+  release:
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build binaries
+        run: |
+          VERSION=$(git rev-parse --short HEAD)
+          DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          LDFLAGS="-s -w -X main.version=${VERSION} -X main.date=${DATE}"
+
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o cloudblockdev-linux-amd64 ./cmd/cloudblockdev
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o cloudblockdev-linux-arm64 ./cmd/cloudblockdev
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          SHA=$(git rev-parse --short HEAD)
+          TS=$(git log -1 --format=%ct)
+          TAG="${TS}-${SHA}"
+          gh release create "${TAG}" \
+            --title "${TAG}" \
+            --notes "Automated build from commit ${SHA}" \
+            --latest \
+            cloudblockdev-linux-amd64 \
+            cloudblockdev-linux-arm64

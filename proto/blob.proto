@@ -1,0 +1,60 @@
+syntax = "proto3";
+package cloudblock;
+option go_package = "github.com/anupcshan/cloudblockdev/internal/cloudblock/pb";
+
+// BlobHeader contains metadata for a blob stored in S3.
+message BlobHeader {
+  // Timestamp in milliseconds since epoch when the blob was created.
+  uint64 timestamp = 1;
+
+  // Blocks describes the device ranges contained in this blob.
+  // Data blocks have their data stored sequentially in the blob's data section.
+  // Hole blocks have no corresponding data (they represent trimmed/zeroed regions).
+  repeated BlockEntry blocks = 2;
+
+  // Total header size in bytes (Magic + Version + HeaderLen + Proto).
+  // Used to compute data offsets when reading from blobs.
+  uint32 header_size = 3;
+}
+
+// BlockEntry describes a single block within a blob.
+message BlockEntry {
+  // Device offset where this block starts.
+  uint64 offset = 1;
+
+  // Length of this block in bytes.
+  uint64 length = 2;
+
+  // If true, this block is a hole (trimmed/zeroed region) with no data.
+  // Reads to this region should return zeros.
+  bool is_hole = 3;
+}
+
+// IndexSegment represents a batch of blob headers stored in S3.
+// Segments cover a range of blob timestamps and are used for
+// cold-start recovery without full blob listing.
+message IndexSegment {
+  // Compaction epoch. Epoch 0 is for normal segments.
+  // Higher epochs are for compacted segments that supersede lower-epoch ones.
+  int32 epoch = 1;
+
+  // Exclusive lower bound of this segment's coverage range.
+  // The segment covers blobs with timestamps in (start, end].
+  // Equal to the previous segment's end_timestamp_inclusive, or 0 for the first.
+  int64 start_timestamp_exclusive = 2;
+
+  // Inclusive upper bound of this segment's coverage range.
+  int64 end_timestamp_inclusive = 3;
+
+  // Blob entries in this segment, sorted by timestamp.
+  repeated IndexSegmentEntry blobs = 4;
+}
+
+// IndexSegmentEntry represents a single blob's metadata in a segment.
+message IndexSegmentEntry {
+  // Blob ID (format: {timestamp_ms}-{random_hex}).
+  string id = 1;
+
+  // Blob header metadata.
+  BlobHeader header = 2;
+}
